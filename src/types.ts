@@ -2,11 +2,11 @@
  * Shared types and constants for pi-cc-plugins.
  */
 
-/** Supported source types and their prefix strings. */
+/** Supported source types. */
 export const SOURCE_TYPES = {
-	github: "github:",
-	git: "git:",
-	local: "local:",
+	github: "github",
+	git: "git",
+	local: "local",
 } as const;
 
 /** Derived type from the SOURCE_TYPES keys. */

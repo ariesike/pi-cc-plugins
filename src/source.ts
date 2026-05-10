@@ -18,21 +18,22 @@ import { SOURCE_TYPES, type ParsedSource, type SourceType } from "./types.js";
 export function parseSource(raw: string): ParsedSource {
 	const [main, fragment] = splitFragment(raw);
 
-	for (const [type, prefix] of Object.entries(SOURCE_TYPES)) {
+	for (const type of Object.keys(SOURCE_TYPES) as SourceType[]) {
+		const prefix = `${type}:`;
 		if (main.startsWith(prefix)) {
 			const ref = main.slice(prefix.length);
 			if (!ref) {
 				throw new Error(`Invalid ${type} source: "${raw}" — expected "${prefix}<value>"`);
 			}
-			if (type === "github" && !ref.includes("/")) {
+			if (type === SOURCE_TYPES.github && !ref.includes("/")) {
 				throw new Error(`Invalid ${type} source: "${raw}" — expected "github:owner/repo"`);
 			}
-			return { type: type as SourceType, ref, subpath: fragment, raw };
+			return { type, ref, subpath: fragment, raw };
 		}
 	}
 
 	throw new Error(
-		`Unknown source format: "${raw}" — expected ${Object.values(SOURCE_TYPES).map((p) => `"${p}..."`).join(", ")}`,
+		`Unknown source format: "${raw}" — expected ${Object.keys(SOURCE_TYPES).map((t) => `"${t}:..."`).join(", ")}`,
 	);
 }
 

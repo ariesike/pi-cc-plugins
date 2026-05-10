@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ParsedSource, ResolvedPlugin } from "./types.js";
+import { SOURCE_TYPES, type ParsedSource, ResolvedPlugin } from "./types.js";
 import { ensureCloned } from "./cache.js";
 
 /**
@@ -17,7 +17,7 @@ import { ensureCloned } from "./cache.js";
 export function resolvePlugin(source: ParsedSource, cwd?: string): ResolvedPlugin {
 	let rootDir: string;
 
-	if (source.type === "local") {
+	if (source.type === SOURCE_TYPES.local) {
 		// Resolve local path
 		let localPath = source.ref;
 		if (localPath.startsWith("~/")) {

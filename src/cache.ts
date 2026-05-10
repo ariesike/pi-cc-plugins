@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ParsedSource, SourceType } from "./types.js";
+import { SOURCE_TYPES, type ParsedSource, type SourceType } from "./types.js";
 
 const XDG_CACHE = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
 const CACHE_DIR = join(XDG_CACHE, "pi-cc-plugins");
@@ -19,14 +19,14 @@ export function getCacheBaseDir(): string {
 
 /** Map a source type to a slug for use as the cache directory name. */
 const slugify: Record<SourceType, (ref: string) => string> = {
-	github: (ref) => ref.replace("/", "--"),
-	git: (ref) =>
+	[SOURCE_TYPES.github]: (ref) => ref.replace("/", "--"),
+	[SOURCE_TYPES.git]: (ref) =>
 		ref
 			.replace(/^https?:\/\//, "")
 			.replace(/\.git$/, "")
 			.replace(/\/$/, "")
 			.replace(/\//g, "--"),
-	local: () => "",
+	[SOURCE_TYPES.local]: () => "",
 };
 
 /**
@@ -78,7 +78,7 @@ export function ensureCloned(source: ParsedSource): string {
 }
 
 function resolveGitUrl(source: ParsedSource): string {
-	if (source.type === "github") {
+	if (source.type === SOURCE_TYPES.github) {
 		return `https://github.com/${source.ref}.git`;
 	}
 	// git: source — ref is already a URL-ish string
