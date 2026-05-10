@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/asermax/pi-cc-plugins/compare/v1.0.0...v1.0.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* include src/ directory in published package ([6f6cfb0](https://github.com/asermax/pi-cc-plugins/commit/6f6cfb0d8d0c0539446357ed674e4d75466b5179))
+
 # 1.0.0 (2026-05-10)
 
 
