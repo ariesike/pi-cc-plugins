@@ -1,0 +1,11 @@
+# 1.0.0 (2026-05-10)
+
+
+### Bug Fixes
+
+* handle bare tilde in local paths, fix CI test ([52c7e3f](https://github.com/asermax/pi-cc-plugins/commit/52c7e3f307bab189b8a2ef0c1e541f71cb693af7))
+
+
+### Features
+
+* initial implementation of pi-cc-plugins extension ([53d4c27](https://github.com/asermax/pi-cc-plugins/commit/53d4c27daa1b53b9db94e70e1c0311cfd2dca3be))
