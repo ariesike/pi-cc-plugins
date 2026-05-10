@@ -92,8 +92,9 @@ describe("resolvePlugin with local source", () => {
 	});
 
 	it("resolves a local plugin with tilde path", () => {
-		const actualPath = join(homedir(), ".cache");
-		const source = parseSource(`local:~/.cache`);
+		// Use home directory itself — always exists
+		const actualPath = homedir();
+		const source = parseSource(`local:~`);
 		const plugin = resolvePlugin(source);
 		expect(plugin.rootDir).toBe(actualPath);
 		expect(plugin.skillPaths).toEqual([]);

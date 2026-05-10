@@ -20,8 +20,8 @@ export function resolvePlugin(source: ParsedSource, cwd?: string): ResolvedPlugi
 	if (source.type === SOURCE_TYPES.local) {
 		// Resolve local path
 		let localPath = source.ref;
-		if (localPath.startsWith("~/")) {
-			localPath = join(homedir(), localPath.slice(2));
+		if (localPath === "~" || localPath.startsWith("~/")) {
+			localPath = localPath === "~" ? homedir() : join(homedir(), localPath.slice(2));
 		} else if (localPath.startsWith("./")) {
 			localPath = resolve(cwd || process.cwd(), localPath);
 		}
