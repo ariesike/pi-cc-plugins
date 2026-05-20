@@ -13,8 +13,8 @@ import { join } from "node:path";
  * Reads global (~/.pi/agent/settings.json) and project (.pi/settings.json) files,
  * merges them (project wins), and returns the ccPlugins array.
  */
-export function readCcPlugins(cwd?: string): string[] {
-	const globalPath = join(homedir(), ".pi", "agent", "settings.json");
+export function readCcPlugins(cwd?: string, options?: { globalSettingsPath?: string }): string[] {
+	const globalPath = options?.globalSettingsPath ?? join(homedir(), ".pi", "agent", "settings.json");
 	const projectPath = cwd ? join(cwd, ".pi", "settings.json") : "";
 
 	const globalSettings = readJsonFile(globalPath);

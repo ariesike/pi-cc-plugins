@@ -52,7 +52,10 @@ export function resolvePlugin(source: ParsedSource, cwd?: string): ResolvedPlugi
 	// Discover skills/ directories
 	const skillPaths = discoverSkillPaths(rootDir);
 
-	return { rootDir, name, skillPaths, source };
+	// Discover agent .md files
+	const agentPaths = discoverAgentPaths(rootDir);
+
+	return { rootDir, name, skillPaths, agentPaths, source };
 }
 
 /**
@@ -131,6 +134,63 @@ function walkSkillDir(dir: string, results: string[]): void {
 	for (const entry of entries) {
 		if (entry.isDirectory() && !entry.name.startsWith(".")) {
 			walkSkillDir(join(dir, entry.name), results);
+		}
+	}
+}
+
+/**
+ * Discover agent markdown files within a plugin root.
+ * Looks for a top-level `agents/` directory and returns absolute paths
+ * to all .md files found (recursively).
+ * Also respects the `agents` field in plugin.json if it specifies a custom path.
+ */
+export function discoverAgentPaths(pluginDir: string): string[] {
+	const paths: string[] = [];
+
+	// Check if plugin.json specifies a custom agents path
+	let agentsDir = join(pluginDir, "agents");
+	const manifestPath = join(pluginDir, ".claude-plugin", "plugin.json");
+	try {
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+		if (manifest.agents && typeof manifest.agents === "string") {
+			// Custom agents path (relative to plugin root)
+			const customPath = manifest.agents.replace(/^\.\.\//, "");
+			agentsDir = join(pluginDir, customPath);
+		}
+	} catch {
+		// Use default agents/ path
+	}
+
+	if (!existsSync(agentsDir) || !statSync(agentsDir).isDirectory()) {
+		return paths;
+	}
+
+	// Walk the agents directory and find all .md files
+	walkAgentDir(agentsDir, paths);
+
+	return paths;
+}
+
+/**
+ * Recursively walk a directory to find agent .md files.
+ * Claude Code plugin agents are flat or nested .md files like:
+ *   agents/code-reviewer.md
+ *   agents/nested/debug-helper.md
+ * We return the absolute paths to each .md file found.
+ */
+function walkAgentDir(dir: string, results: string[]): void {
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+
+	for (const entry of entries) {
+		if (entry.isFile() && entry.name.endsWith(".md")) {
+			results.push(join(dir, entry.name));
+		} else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+			walkAgentDir(join(dir, entry.name), results);
 		}
 	}
 }

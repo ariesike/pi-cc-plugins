@@ -30,6 +30,26 @@ export interface ResolvedPlugin {
 	name: string;
 	/** Absolute paths to skills/ directories found in this plugin */
 	skillPaths: string[];
+	/** Absolute paths to agent .md files found in this plugin */
+	agentPaths: string[];
 	/** The parsed source this plugin came from */
 	source: ParsedSource;
+}
+
+/** Parsed frontmatter from a Claude Code agent .md file. */
+export interface ParsedAgent {
+	/** Agent name from frontmatter */
+	name: string;
+	/** Agent description from frontmatter */
+	description: string;
+	/** Model to use (pass-through) */
+	model?: string;
+	/** Comma-separated tool allowlist */
+	tools?: string;
+	/** Comma-separated skill names to preload */
+	skills?: string;
+	/** System prompt body (everything after frontmatter) */
+	systemPrompt: string;
+	/** Absolute path to the original agent file */
+	filePath: string;
 }

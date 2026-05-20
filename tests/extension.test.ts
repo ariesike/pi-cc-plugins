@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { resolve, join } from "node:path";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 
 // We test the extension lifecycle by simulating Pi's event system
 // and checking that the correct skill paths are contributed.
 
 const fixtures = resolve(import.meta.dirname, "fixtures");
+
+/** Shared temp directory for hermetic tests */
+const tmpDir = join(homedir(), ".pi-cc-plugins-test-tmp");
 
 /** Create a mock ExtensionAPI that captures event registrations */
 function createMockPi() {
@@ -43,61 +46,88 @@ import { parseSource, resolvePlugin } from "../src/index.js";
 import { readCcPlugins } from "../src/settings.js";
 
 describe("extension lifecycle", () => {
-	it("registers session_start and resources_discover handlers", () => {
+	const mockGlobalSettingsPath = join(tmpDir, "global-settings.json");
+
+	beforeEach(() => {
+		mkdirSync(tmpDir, { recursive: true });
+		writeFileSync(mockGlobalSettingsPath, "{}");
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("registers session_start, resources_discover, and session_shutdown handlers", () => {
 		const { mockPi } = createMockPi();
-		extension(mockPi as any);
+		extension(mockPi as any, { globalSettingsPath: mockGlobalSettingsPath });
 
 		expect(mockPi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
 		expect(mockPi.on).toHaveBeenCalledWith("resources_discover", expect.any(Function));
+		expect(mockPi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
 	});
 
 	it("contributes skill paths from a local plugin", async () => {
 		const { mockPi, handlers } = createMockPi();
-		extension(mockPi as any);
+		extension(mockPi as any, { globalSettingsPath: mockGlobalSettingsPath });
 
-		const localPluginDir = resolve(fixtures, "mock-plugin");
 		const ctx = createMockCtx();
-
-		// Simulate session_start — but we need settings to point to our local fixture
-		// Since the extension reads settings from files, we'll use a temp settings approach
-		// For this test, we directly exercise the handlers with a modified approach
 
 		// Trigger resources_discover with no prior session_start
 		const discoverResult = await handlers["resources_discover"]({}, ctx);
 		expect(discoverResult).toBeUndefined(); // no plugins resolved yet
 	});
 
-	it("notifies when plugins are loaded", () => {
+	it("does not notify when no plugins are configured", () => {
 		const { mockPi, handlers } = createMockPi();
-		extension(mockPi as any);
+		extension(mockPi as any, { globalSettingsPath: mockGlobalSettingsPath });
 
-		// Without any ccPlugins in settings, session_start should be a no-op
 		const ctx = createMockCtx("/nonexistent/path");
 		handlers["session_start"]({}, ctx);
 
-		// No notification if no plugins configured
+		// No plugins → no notification
 		expect(ctx.ui.notify).not.toHaveBeenCalled();
+	});
+
+	it("loads plugins from project settings", () => {
+		const projectDir = join(tmpDir, "my-project");
+		const settingsDir = join(projectDir, ".pi");
+		mkdirSync(settingsDir, { recursive: true });
+		writeFileSync(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ ccPlugins: [`local:${resolve(fixtures, "mock-plugin")}`] }),
+		);
+
+		const { mockPi, handlers } = createMockPi();
+		extension(mockPi as any, { globalSettingsPath: mockGlobalSettingsPath });
+
+		const ctx = createMockCtx(projectDir);
+		handlers["session_start"]({}, ctx);
+
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("2 skill(s)"),
+			"info",
+		);
 	});
 });
 
 describe("resolvePlugin with local source", () => {
-	// Test local source resolution directly
 	it("resolves a local plugin and discovers its skills", () => {
 		const source = parseSource(`local:${resolve(fixtures, "mock-plugin")}`);
 		const plugin = resolvePlugin(source);
 
 		expect(plugin.name).toBe("mock-plugin");
 		expect(plugin.skillPaths).toHaveLength(2);
+		expect(plugin.agentPaths).toEqual([]);
 		expect(plugin.rootDir).toBe(resolve(fixtures, "mock-plugin"));
 	});
 
 	it("resolves a local plugin with tilde path", () => {
-		// Use home directory itself — always exists
 		const actualPath = homedir();
 		const source = parseSource(`local:~`);
 		const plugin = resolvePlugin(source);
 		expect(plugin.rootDir).toBe(actualPath);
 		expect(plugin.skillPaths).toEqual([]);
+		expect(plugin.agentPaths).toEqual([]);
 	});
 
 	it("throws for non-existent local path", () => {
@@ -107,18 +137,17 @@ describe("resolvePlugin with local source", () => {
 
 	it("resolves local plugin with subpath", () => {
 		const source = parseSource(`local:${resolve(fixtures, "mock-plugin")}#subpath=skills/code-reviewer`);
-		// This subpath exists but is a skill dir, not a plugin dir — but it should still resolve
-		// The rootDir will be the subpath, but no skills/ dir inside a skill dir
 		const plugin = resolvePlugin(source);
 		expect(plugin.rootDir).toBe(resolve(fixtures, "mock-plugin", "skills", "code-reviewer"));
 	});
 });
 
 describe("readCcPlugins", () => {
-	const tmpDir = join(homedir(), ".pi-cc-plugins-test-tmp");
+	const mockGlobalSettingsPath = join(tmpDir, "global-settings.json");
 
 	beforeEach(() => {
 		mkdirSync(tmpDir, { recursive: true });
+		writeFileSync(mockGlobalSettingsPath, "{}");
 	});
 
 	afterEach(() => {
@@ -133,7 +162,7 @@ describe("readCcPlugins", () => {
 			JSON.stringify({ ccPlugins: ["github:owner/repo", "local:~/path"] }),
 		);
 
-		const result = readCcPlugins(tmpDir);
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual(["github:owner/repo", "local:~/path"]);
 	});
 
@@ -142,19 +171,20 @@ describe("readCcPlugins", () => {
 			join(tmpDir, "settings.json"),
 			JSON.stringify({ theme: "dark" }),
 		);
-		// No .pi directory
-		const result = readCcPlugins(tmpDir);
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual([]);
 	});
 
 	it("returns empty array when settings file doesn't exist", () => {
-		const result = readCcPlugins("/nonexistent/directory");
+		const result = readCcPlugins("/nonexistent/directory", { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual([]);
 	});
 
 	it("merges project settings over global settings", () => {
-		// We can't easily mock the global settings path (it's hardcoded to ~/.pi/agent/settings.json)
-		// So we just test that project settings are read correctly
+		writeFileSync(
+			mockGlobalSettingsPath,
+			JSON.stringify({ ccPlugins: ["github:global/plugin"] }),
+		);
 		const settingsDir = join(tmpDir, ".pi");
 		mkdirSync(settingsDir, { recursive: true });
 		writeFileSync(
@@ -162,8 +192,24 @@ describe("readCcPlugins", () => {
 			JSON.stringify({ ccPlugins: ["github:foo/bar"] }),
 		);
 
-		const result = readCcPlugins(tmpDir);
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual(["github:foo/bar"]);
+	});
+
+	it("falls back to global settings when project has no ccPlugins", () => {
+		writeFileSync(
+			mockGlobalSettingsPath,
+			JSON.stringify({ ccPlugins: ["github:global/plugin"] }),
+		);
+		const settingsDir = join(tmpDir, ".pi");
+		mkdirSync(settingsDir, { recursive: true });
+		writeFileSync(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ theme: "dark" }),
+		);
+
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
+		expect(result).toEqual(["github:global/plugin"]);
 	});
 
 	it("handles JSON with comments", () => {
@@ -177,7 +223,7 @@ describe("readCcPlugins", () => {
 }`,
 		);
 
-		const result = readCcPlugins(tmpDir);
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual(["github:owner/repo"]);
 	});
 
@@ -189,7 +235,7 @@ describe("readCcPlugins", () => {
 			JSON.stringify({ ccPlugins: ["github:owner/repo", 42, null, { foo: "bar" }] }),
 		);
 
-		const result = readCcPlugins(tmpDir);
+		const result = readCcPlugins(tmpDir, { globalSettingsPath: mockGlobalSettingsPath });
 		expect(result).toEqual(["github:owner/repo"]);
 	});
 });
