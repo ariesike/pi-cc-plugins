@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/asermax/pi-cc-plugins/compare/v1.0.1...v1.1.0) (2026-05-20)
+
+
+### Features
+
+* add agent support for Claude Code plugins ([a5d9b52](https://github.com/asermax/pi-cc-plugins/commit/a5d9b527004cfd10fda7063278183d54ac905a39))
+
 ## [1.0.1](https://github.com/asermax/pi-cc-plugins/compare/v1.0.0...v1.0.1) (2026-05-10)
 
 
