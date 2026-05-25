@@ -7,14 +7,66 @@
  * and rewrite only the copied SKILL.md frontmatter into Pi-compatible YAML.
  */
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { getCacheBaseDir } from "./cache.js";
 import type { ResolvedPlugin } from "./types.js";
 
 /** Copy discovered skill directories to cache and sanitize their SKILL.md files. */
 export function materializeSkillPaths(plugin: ResolvedPlugin): string[] {
-	return plugin.skillPaths.map((skillPath) => materializeSkillPath(plugin, skillPath));
+	return plugin.skillPaths.map((skillPath) => {
+		const relativeSkillPath = relative(plugin.rootDir, skillPath);
+		const cacheSkillPath = join(
+			getCacheBaseDir(),
+			"skills",
+			normalizeSkillName(plugin.name, "plugin"),
+			hash(`${plugin.source.raw}\n${plugin.rootDir}`),
+			slugPath(relativeSkillPath || basename(skillPath)),
+		);
+
+		return copyAndSanitizeSkillDir(skillPath, cacheSkillPath);
+	});
+}
+
+/**
+ * Materialize a standalone skill directory (not from a plugin).
+ * Uses a namespace and source ID for cache isolation.
+ */
+export function materializeStandaloneSkillPath(
+	namespace: string,
+	sourceId: string,
+	rootDir: string,
+	skillPath: string,
+): string {
+	const relativeSkillPath = relative(rootDir, skillPath);
+	const cacheSkillPath = join(
+		getCacheBaseDir(),
+		"skills",
+		normalizeSkillName(namespace, "standalone"),
+		hash(sourceId),
+		slugPath(relativeSkillPath || basename(skillPath)),
+	);
+
+	return copyAndSanitizeSkillDir(skillPath, cacheSkillPath);
+}
+
+/**
+ * Copy a skill directory to a cache path and sanitize its SKILL.md frontmatter.
+ */
+function copyAndSanitizeSkillDir(skillPath: string, cacheSkillPath: string): string {
+	rmSync(cacheSkillPath, { recursive: true, force: true });
+	mkdirSync(cacheSkillPath, { recursive: true });
+	cpSync(skillPath, cacheSkillPath, { recursive: true, force: true });
+
+	const skillFilePath = join(cacheSkillPath, "SKILL.md");
+	if (existsSync(skillFilePath)) {
+		writeFileSync(
+			skillFilePath,
+			sanitizeSkillMarkdown(readFileSync(skillFilePath, "utf-8"), basename(skillPath)),
+		);
+	}
+
+	return cacheSkillPath;
 }
 
 /** Rewrite a SKILL.md document so Pi can parse its frontmatter as strict YAML. */
@@ -45,29 +97,28 @@ export function normalizeSkillName(name: string, fallbackName = "skill"): string
 	return normalizeSkillName(fallbackName, "skill");
 }
 
-function materializeSkillPath(plugin: ResolvedPlugin, skillPath: string): string {
-	const relativeSkillPath = relative(plugin.rootDir, skillPath);
-	const cacheSkillPath = join(
-		getCacheBaseDir(),
-		"skills",
-		normalizeSkillName(plugin.name, "plugin"),
-		hash(`${plugin.source.raw}\n${plugin.rootDir}`),
-		slugPath(relativeSkillPath || basename(skillPath)),
-	);
-
-	rmSync(cacheSkillPath, { recursive: true, force: true });
-	mkdirSync(cacheSkillPath, { recursive: true });
-	cpSync(skillPath, cacheSkillPath, { recursive: true, force: true });
-
-	const skillFilePath = join(cacheSkillPath, "SKILL.md");
-	if (existsSync(skillFilePath)) {
-		writeFileSync(
-			skillFilePath,
-			sanitizeSkillMarkdown(readFileSync(skillFilePath, "utf-8"), basename(skillPath)),
-		);
+/**
+ * Recursively walk a directory to find skill directories (containing SKILL.md).
+ * Returns the parent directories of SKILL.md files.
+ */
+export function walkSkillDir(dir: string, results: string[]): void {
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
 	}
 
-	return cacheSkillPath;
+	if (entries.some((e) => e.isFile() && e.name === "SKILL.md")) {
+		results.push(dir);
+		return;
+	}
+
+	for (const entry of entries) {
+		if (entry.isDirectory() && !entry.name.startsWith(".")) {
+			walkSkillDir(join(dir, entry.name), results);
+		}
+	}
 }
 
 function splitFrontmatter(content: string): { frontmatter: string; body: string } | null {

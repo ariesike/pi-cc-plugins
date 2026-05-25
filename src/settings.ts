@@ -28,6 +28,39 @@ export function readCcPlugins(cwd?: string, options?: { globalSettingsPath?: str
 	return ccPlugins.filter((s) => typeof s === "string");
 }
 
+/**
+ * Read a boolean setting from Pi's merged settings.
+ * Returns the value if it's a boolean, otherwise returns the fallback.
+ */
+function readBooleanSetting(key: string, cwd?: string, options?: { globalSettingsPath?: string }): boolean {
+	const globalPath = options?.globalSettingsPath ?? join(homedir(), ".pi", "agent", "settings.json");
+	const projectPath = cwd ? join(cwd, ".pi", "settings.json") : "";
+
+	const globalSettings = readJsonFile(globalPath);
+	const projectSettings = projectPath ? readJsonFile(projectPath) : {};
+
+	const merged = { ...globalSettings, ...projectSettings };
+	const value = merged[key];
+
+	return typeof value === "boolean" ? value : false;
+}
+
+/**
+ * Read the ccClaudeSkillsGlobal boolean from Pi's merged settings.
+ * When true, the extension discovers skills from ~/.claude/skills/.
+ */
+export function readCcClaudeSkillsGlobal(cwd?: string, options?: { globalSettingsPath?: string }): boolean {
+	return readBooleanSetting("ccClaudeSkillsGlobal", cwd, options);
+}
+
+/**
+ * Read the ccClaudeSkillsProject boolean from Pi's merged settings.
+ * When true, the extension discovers skills from <project>/.claude/skills/.
+ */
+export function readCcClaudeSkillsProject(cwd?: string, options?: { globalSettingsPath?: string }): boolean {
+	return readBooleanSetting("ccClaudeSkillsProject", cwd, options);
+}
+
 export function readJsonFile(filePath: string): Record<string, unknown> {
 	if (!existsSync(filePath)) return {};
 	try {

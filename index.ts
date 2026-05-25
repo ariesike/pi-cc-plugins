@@ -23,12 +23,15 @@
  * Install:
  *   pi install git:git@github.com:asermax/pi-cc-plugins
  */
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ResolvedPlugin } from "./src/types.js";
 import { parseSource } from "./src/source.js";
-import { readCcPlugins } from "./src/settings.js";
+import { readCcPlugins, readCcClaudeSkillsGlobal, readCcClaudeSkillsProject } from "./src/settings.js";
 import { resolvePlugin } from "./src/plugin.js";
-import { materializeSkillPaths } from "./src/skills.js";
+import { materializeSkillPaths, materializeStandaloneSkillPath, walkSkillDir } from "./src/skills.js";
 import {
 	parseCcAgent,
 	convertCcAgent,
@@ -41,10 +44,10 @@ import {
 } from "./src/agents.js";
 
 export { parseSource } from "./src/source.js";
-export { readCcPlugins, readJsonFile } from "./src/settings.js";
+export { readCcPlugins, readCcClaudeSkillsGlobal, readCcClaudeSkillsProject, readJsonFile } from "./src/settings.js";
 export { getCacheBaseDir, getCloneDir, ensureCloned } from "./src/cache.js";
 export { resolvePlugin, readPluginName, discoverSkillPaths, discoverAgentPaths } from "./src/plugin.js";
-export { materializeSkillPaths, sanitizeSkillMarkdown, normalizeSkillName } from "./src/skills.js";
+export { materializeSkillPaths, materializeStandaloneSkillPath, walkSkillDir, sanitizeSkillMarkdown, normalizeSkillName } from "./src/skills.js";
 export type { ParsedSource, ResolvedPlugin, ParsedAgent } from "./src/types.js";
 export {
 	parseFrontmatter,
@@ -67,6 +70,8 @@ export interface ExtensionOptions {
 export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 	/** Cached resolved plugins for the current session */
 	let resolvedPlugins: ResolvedPlugin[] = [];
+	/** Materialized skill paths from .claude/skills (not from plugins) */
+	let claudeSkillPaths: string[] = [];
 	/** Track whether we incremented the refcount for this session */
 	let hasRefcount = false;
 	/** Track the cwd for cleanup on shutdown */
@@ -75,14 +80,50 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 	/** Read ccPlugins using the configured or overridden global settings path. */
 	const getPlugins = (cwd: string) => readCcPlugins(cwd, { globalSettingsPath: options?.globalSettingsPath });
 
+	/** Read ccClaudeSkills* settings. */
+	const getSettingsOpts = (cwd: string) => ({ globalSettingsPath: options?.globalSettingsPath });
+
+	/**
+	 * Discover and materialize skills from a .claude/skills directory.
+	 * Returns an array of materialized cache paths.
+	 */
+	const loadClaudeSkills = (skillsDir: string, namespace: string, sourceId: string): string[] => {
+		if (!existsSync(skillsDir)) return [];
+
+		const discovered: string[] = [];
+		walkSkillDir(skillsDir, discovered);
+
+		return discovered.map((skillPath) =>
+			materializeStandaloneSkillPath(namespace, sourceId, skillsDir, skillPath),
+		);
+	};
+
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCwd = ctx.cwd;
 		resolvedPlugins = [];
+		claudeSkillPaths = [];
 		hasRefcount = false;
 
 		const ccPlugins = getPlugins(ctx.cwd);
-		if (ccPlugins.length === 0) return;
+		const settingsOpts = getSettingsOpts(ctx.cwd);
 
+		// --- Load .claude/skills directories ---
+		const ccClaudeSkillsGlobal = readCcClaudeSkillsGlobal(ctx.cwd, settingsOpts);
+		const ccClaudeSkillsProject = readCcClaudeSkillsProject(ctx.cwd, settingsOpts);
+
+		if (ccClaudeSkillsGlobal) {
+			const globalClaudeSkillsDir = join(homedir(), ".claude", "skills");
+			const materialized = loadClaudeSkills(globalClaudeSkillsDir, "claude-global", "~/.claude/skills");
+			claudeSkillPaths.push(...materialized);
+		}
+
+		if (ccClaudeSkillsProject) {
+			const projectClaudeSkillsDir = join(ctx.cwd, ".claude", "skills");
+			const materialized = loadClaudeSkills(projectClaudeSkillsDir, "claude-project", ".claude/skills");
+			claudeSkillPaths.push(...materialized);
+		}
+
+		// --- Load ccPlugins ---
 		const errors: string[] = [];
 
 		for (const raw of ccPlugins) {
@@ -96,13 +137,8 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 			}
 		}
 
+		// --- Agent handling (from ccPlugins only) ---
 		if (resolvedPlugins.length > 0) {
-			const skillCount = resolvedPlugins.reduce(
-				(sum, p) => sum + p.skillPaths.length,
-				0,
-			);
-
-			// --- Agent handling ---
 			const totalAgentPaths = resolvedPlugins.reduce(
 				(sum, p) => sum + p.agentPaths.length,
 				0,
@@ -155,15 +191,18 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 					}
 				}
 			}
+		}
 
-			// Build notification message
+		// --- Notification ---
+		const pluginSkillCount = resolvedPlugins.reduce((sum, p) => sum + p.skillPaths.length, 0);
+		const claudeSkillCount = claudeSkillPaths.length;
+		const totalSkillCount = pluginSkillCount + claudeSkillCount;
+
+		if (totalSkillCount > 0 || resolvedPlugins.length > 0) {
 			const parts: string[] = [];
-			if (skillCount > 0) parts.push(`${skillCount} skill(s)`);
-			if (agentCount > 0) parts.push(`${agentCount} agent(s)`);
-			const loadedMsg = parts.length > 0
-				? `loaded ${parts.join(" and ")} from ${resolvedPlugins.length} plugin(s)`
-				: `loaded ${resolvedPlugins.length} plugin(s)`;
-			ctx.ui.notify(`cc-plugins: ${loadedMsg}`, "info");
+			if (totalSkillCount > 0) parts.push(`${totalSkillCount} skill(s)`);
+			if (resolvedPlugins.length > 0) parts.push(`${resolvedPlugins.length} plugin(s)`);
+			ctx.ui.notify(`cc-plugins: loaded ${parts.join(" and ")}`, "info");
 		}
 
 		if (errors.length > 0) {
@@ -175,9 +214,10 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 	});
 
 	pi.on("resources_discover", async (_event, _ctx) => {
-		const skillPaths = resolvedPlugins.flatMap((p) => p.skillPaths);
-		if (skillPaths.length === 0) return undefined;
-		return { skillPaths };
+		const pluginSkillPaths = resolvedPlugins.flatMap((p) => p.skillPaths);
+		const allSkillPaths = [...pluginSkillPaths, ...claudeSkillPaths];
+		if (allSkillPaths.length === 0) return undefined;
+		return { skillPaths: allSkillPaths };
 	});
 
 	pi.on("session_shutdown", () => {

@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { SOURCE_TYPES, type ParsedSource, ResolvedPlugin } from "./types.js";
+import { walkSkillDir } from "./skills.js";
 import { ensureCloned } from "./cache.js";
 
 /**
@@ -107,35 +108,6 @@ export function discoverSkillPaths(pluginDir: string): string[] {
 	walkSkillDir(skillsDir, paths);
 
 	return paths;
-}
-
-/**
- * Recursively walk a directory to find skill directories (containing SKILL.md).
- * Claude Code plugins can have nested skill directories like:
- *   skills/code-reviewer/SKILL.md
- *   skills/pdf-processor/SKILL.md
- * We return the parent directories of SKILL.md files.
- */
-function walkSkillDir(dir: string, results: string[]): void {
-	let entries;
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return;
-	}
-
-	// If this directory contains SKILL.md, it's a skill directory itself
-	if (entries.some((e) => e.isFile() && e.name === "SKILL.md")) {
-		results.push(dir);
-		return;
-	}
-
-	// Otherwise, recurse into subdirectories
-	for (const entry of entries) {
-		if (entry.isDirectory() && !entry.name.startsWith(".")) {
-			walkSkillDir(join(dir, entry.name), results);
-		}
-	}
 }
 
 /**

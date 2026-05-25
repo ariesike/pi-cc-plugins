@@ -87,6 +87,56 @@ If the plugin's `plugin.json` specifies custom paths, they will be respected:
 }
 ```
 
+## Standalone `.claude/skills`
+
+In addition to loading skills from plugin repos, this extension can load standalone Claude Code skills from your global or project `.claude/skills` directories. These skills go through the same frontmatter sanitization as plugin skills, ensuring Pi can parse them correctly.
+
+### Settings
+
+Add either or both settings to your Pi settings file:
+
+```jsonc
+// ~/.pi/agent/settings.json or .pi/settings.json
+{
+  "ccClaudeSkillsGlobal": true,   // load skills from ~/.claude/skills/
+  "ccClaudeSkillsProject": true   // load skills from <project>/.claude/skills/
+}
+```
+
+Both default to `false` (opt-in) to avoid conflicts with Pi's native `skills` setting if you're already using it to point at `.claude/skills`.
+
+### How It Works
+
+1. On startup, the extension checks the `ccClaudeSkillsGlobal` and `ccClaudeSkillsProject` settings
+2. For each enabled setting, it scans the corresponding `.claude/skills/` directory for subdirectories containing `SKILL.md` files
+3. Discovered skill directories are copied to the cache with sanitized frontmatter (same as plugin skills)
+4. The cached skill paths are contributed to Pi via `resources_discover`
+5. Pi loads them as native skills
+
+### Directory Structure
+
+```
+~/.claude/skills/          # global (ccClaudeSkillsGlobal)
+  my-global-skill/
+    SKILL.md
+
+<project>/.claude/skills/  # project (ccClaudeSkillsProject)
+  my-project-skill/
+    SKILL.md
+```
+
+### Relationship to Pi's Native `skills` Setting
+
+Pi has a built-in `skills` setting that can point at arbitrary directories:
+
+```json
+{
+  "skills": ["~/.claude/skills"]
+}
+```
+
+However, Pi loads those skills as-is without any frontmatter sanitization. Claude Code `SKILL.md` files often use loose YAML (unquoted strings with colons, underscores in names) that Pi's strict YAML parser rejects. Using `ccClaudeSkillsGlobal`/`ccClaudeSkillsProject` instead ensures the frontmatter is normalized automatically.
+
 ## Agents
 
 Plugin agents are converted to [pi-subagents](https://github.com/nicobailon/pi-subagents) format and made available as project-level agents.
