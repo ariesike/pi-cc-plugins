@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/asermax/pi-cc-plugins/compare/v1.1.1...v1.2.0) (2026-05-25)
+
+
+### Features
+
+* load skills from ~/.claude/skills and .claude/skills directories ([15aea89](https://github.com/asermax/pi-cc-plugins/commit/15aea89b86ca70491e3ddf87344e6b884f81eb7c))
+
 ## [1.1.1](https://github.com/asermax/pi-cc-plugins/compare/v1.1.0...v1.1.1) (2026-05-20)
 
 
