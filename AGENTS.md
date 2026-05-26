@@ -2,13 +2,15 @@
 
 ## What This Project Does
 
-A [Pi](https://pi.dev) extension that bridges [Claude Code](https://code.claude.com) plugins into Pi. It reads plugin source references from Pi settings, clones remote repos into a local cache, discovers `SKILL.md` files and agent `.md` files inside them, and makes them available to Pi.
+A [Pi](https://pi.dev) extension that bridges [Claude Code](https://code.claude.com) plugins into Pi. It reads plugin source references from Pi settings, clones remote repos into a local cache, discovers `SKILL.md` files, agent `.md` files, and MCP configs inside them, and makes them available to Pi.
 
 **Supported plugin components:**
 - **Skills** — `SKILL.md` files exposed via Pi's `resources_discover` event
 - **Agents** — `.md` files from `agents/` directories, converted to pi-subagents format and symlinked into `.pi/agents/cc-plugins/`
+- **MCP servers** — `mcp.json`, `.mcp.json`, or manifest-declared MCP configs merged into project `.pi/mcp.json` for pi-mcp-adapter
 
 **Requirements for agents:** [pi-subagents](https://github.com/nicobailon/pi-subagents) must be installed. If it's not found in Pi's `packages` settings, agent loading is skipped with a warning.
+**Requirements for MCP:** [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) must be installed. If plugin MCP configs are found without it, MCP loading is skipped with a warning.
 
 ## Architecture
 
@@ -19,8 +21,9 @@ src/
   source.ts       Parses source strings (github:..., git:..., local:...) into ParsedSource
   settings.ts     Reads ccPlugins array from merged Pi settings (global + project)
   cache.ts        Git cloning + cache management under ~/.cache/pi-cc-plugins/
-  plugin.ts       Resolves a ParsedSource into a ResolvedPlugin, discovers skill + agent paths
+  plugin.ts       Resolves a ParsedSource into a ResolvedPlugin, discovers skill + agent + MCP config paths
   agents.ts       Agent parsing, format conversion, caching, and symlink management
+  mcp.ts          MCP config parsing, namespacing, project merge, and sidecar management
   index.ts        Barrel re-exports of all public API
 tests/            Vitest tests with fixtures
 ```
@@ -42,6 +45,14 @@ tests/            Vitest tests with fixtures
 5. pi-subagents discovers agents via its recursive `.pi/agents/` scan (follows symlinks)
 6. `session_shutdown` → `decrementRefcount()` → removes symlinks when count reaches 0
 
+#### MCP servers
+1. `session_start` → check `isMcpAdapterInstalled()` via Pi settings `packages` array when plugin MCP configs are present
+2. `discoverMcpConfigPaths()` checks `mcp.json`, `.mcp.json`, then `.claude-plugin/plugin.json` `mcp`
+3. `collectPluginMcpServers()` reads only object-shaped `mcpServers` / `mcp-servers` entries; top-level settings/imports are ignored
+4. Servers are namespaced as `{plugin-name}__{server-name}` and merged into `{project}/.pi/mcp.json`
+5. Managed entries are tracked in `{project}/.pi/mcp.cc-plugins.json` so stale entries can be removed on later `session_start`
+6. Existing user MCP servers win on collision with generated plugin names
+
 ### Agent format conversion
 
 Claude Code plugin agents use simple YAML frontmatter. The converter maps:
@@ -51,8 +62,8 @@ Claude Code plugin agents use simple YAML frontmatter. The converter maps:
 | `name` | `name` | Direct |
 | — | `package` | Set to plugin name for namespacing |
 | `description` | `description` | Direct |
-| `model` | `model` | Pass-through |
-| `tools` | `tools` | Pass-through |
+| `model` | — | Dropped |
+| `tools` | — | Dropped |
 | `skills` | `skills` | Pass-through |
 | — | `systemPromptMode` | Default `append` |
 | — | `inheritProjectContext` | Default `true` |
@@ -61,6 +72,8 @@ Claude Code plugin agents use simple YAML frontmatter. The converter maps:
 ### Reference counting
 
 Multiple Pi sessions in the same project can use agents concurrently. A `.cc-plugins-refcount` file in `.pi/agents/cc-plugins/` tracks active sessions. Symlinks and the directory are only removed when the count reaches 0 on `session_shutdown`.
+
+MCP entries are not removed on `session_shutdown`; they stay in project `.pi/mcp.json` so pi-mcp-adapter can read them on the next startup. Stale managed entries are cleaned on `session_start` using `.pi/mcp.cc-plugins.json`.
 
 ## Conventions
 

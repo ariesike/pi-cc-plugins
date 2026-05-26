@@ -61,6 +61,18 @@ export function readCcClaudeProject(cwd?: string, options?: { globalSettingsPath
 	return readBooleanSetting("ccClaudeProject", cwd, options);
 }
 
+export function readPiPackages(options?: { globalSettingsPath?: string }): string[] {
+	const globalPath = options?.globalSettingsPath ?? join(homedir(), ".pi", "agent", "settings.json");
+	const packages = readJsonFile(globalPath).packages;
+
+	if (!Array.isArray(packages)) return [];
+	return packages.filter((entry): entry is string => typeof entry === "string");
+}
+
+export function isMcpAdapterInstalled(options?: { globalSettingsPath?: string }): boolean {
+	return readPiPackages(options).some((entry) => entry.toLowerCase().includes("pi-mcp-adapter"));
+}
+
 export function readJsonFile(filePath: string): Record<string, unknown> {
 	if (!existsSync(filePath)) return {};
 	try {

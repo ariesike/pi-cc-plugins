@@ -1,8 +1,8 @@
 # pi-cc-plugins
 
-Use [Claude Code](https://code.claude.com) plugins (skills & agents) directly in [Pi](https://pi.dev).
+Use [Claude Code](https://code.claude.com) plugins (skills, agents, and MCP servers) directly in [Pi](https://pi.dev).
 
-This extension bridges Claude Code's plugin ecosystem into Pi by reading plugin sources from your settings, cloning their repos into a local cache, and exposing their **skills** and **agents** so Pi loads them natively.
+This extension bridges Claude Code's plugin ecosystem into Pi by reading plugin sources from your settings, cloning their repos into a local cache, and exposing their **skills**, **agents**, and plugin-provided **MCP servers** so Pi loads them natively.
 
 ## Install
 
@@ -23,7 +23,7 @@ Add a `ccPlugins` array to your Pi settings (`~/.pi/agent/settings.json` for glo
 ```jsonc
 {
   "ccPlugins": [
-    // Clone a GitHub repo and use its skills/ and agents/
+    // Clone a GitHub repo and use its skills/, agents/, and MCP configs
     "github:pleaseai/claude-code-plugins",
 
     // Clone a repo but use a specific subdirectory as the plugin root
@@ -73,8 +73,9 @@ my-plugin/
 │   │   └── SKILL.md
 │   └── pdf-processor/
 │       └── SKILL.md
-└── agents/
-    └── security-scanner.md
+├── agents/
+│   └── security-scanner.md
+└── mcp.json              # optional MCP server config
 ```
 
 If the plugin's `plugin.json` specifies custom paths, they will be respected:
@@ -83,7 +84,8 @@ If the plugin's `plugin.json` specifies custom paths, they will be respected:
 {
   "name": "my-plugin",
   "skills": "./custom-skills-dir",
-  "agents": "./custom-agents-dir"
+  "agents": "./custom-agents-dir",
+  "mcp": "./custom-mcp.json"
 }
 ```
 
@@ -205,6 +207,41 @@ Plugin agents show up as `{plugin-name}.{agent-name}`. Standalone Claude agents 
 
 If multiple Pi sessions are open in the same project, agent symlinks are reference-counted. They are only removed when the last session shuts down.
 
+## MCP servers
+
+Plugin MCP configs can be exposed through [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) when that extension is installed.
+
+### Requirements
+
+- **pi-mcp-adapter must be installed** — if plugin MCP configs are found but the adapter is missing, MCP loading is skipped with a warning. Install it with:
+  ```bash
+  pi install npm:pi-mcp-adapter
+  ```
+
+### Supported Config Locations
+
+For each plugin, the extension checks these files in order:
+
+1. `mcp.json`
+2. `.mcp.json`
+3. The `.claude-plugin/plugin.json` `mcp` path, resolved relative to the plugin root
+
+If multiple files define the same original server name, later files in that order win before namespacing.
+
+### How MCP Loading Works
+
+1. On `session_start`, the extension scans plugin MCP configs after resolving `ccPlugins`
+2. It imports only object-shaped `mcpServers` / `mcp-servers` entries
+3. Top-level `settings`, `imports`, and unknown fields from plugin configs are ignored
+4. Servers are written to `{project}/.pi/mcp.json`, which pi-mcp-adapter already reads
+5. Managed entries are tracked in `{project}/.pi/mcp.cc-plugins.json` so stale plugin servers can be removed safely on the next startup
+
+Plugin server names are project-scoped and namespaced as `{plugin-name}__{server-name}`. For example, a `chrome-devtools` server from `my-plugin` becomes `my-plugin__chrome-devtools`.
+
+User-owned entries in `.pi/mcp.json` are preserved. If a generated plugin server name collides with an existing user server, the plugin server is skipped with a warning.
+
+If plugin MCP config is added for the first time during a running session, pi-mcp-adapter may need a reload or restart to pick it up depending on extension startup order. Once materialized, the config is available on subsequent starts.
+
 ### Cache
 
 - Cached repos live in `~/.cache/pi-cc-plugins/` (respects `$XDG_CACHE_HOME`)
@@ -215,7 +252,7 @@ If multiple Pi sessions are open in the same project, agent symlinks are referen
 
 ### Removing Plugins
 
-Simply remove the entry from your `ccPlugins` array in settings. On the next session start, stale agent symlinks are cleaned up and skills will no longer be discovered. The cached clone remains on disk until you delete it manually.
+Simply remove the entry from your `ccPlugins` array in settings. On the next session start, stale agent symlinks and managed MCP entries are cleaned up, and skills will no longer be discovered. The cached clone remains on disk until you delete it manually.
 
 ## Development
 

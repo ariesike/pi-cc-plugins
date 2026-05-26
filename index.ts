@@ -29,7 +29,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ResolvedPlugin } from "./src/types.js";
 import { parseSource } from "./src/source.js";
-import { readCcPlugins, readCcClaudeGlobal, readCcClaudeProject } from "./src/settings.js";
+import { isMcpAdapterInstalled, readCcPlugins, readCcClaudeGlobal, readCcClaudeProject } from "./src/settings.js";
 import { discoverAgentPaths, resolvePlugin } from "./src/plugin.js";
 import { materializeSkillPaths, materializeStandaloneSkillPath, walkSkillDir } from "./src/skills.js";
 import {
@@ -42,13 +42,14 @@ import {
 	cleanupStaleSymlinks,
 	isSubagentsInstalled,
 } from "./src/agents.js";
+import { hasManagedMcpState, syncProjectMcpConfig } from "./src/mcp.js";
 
 export { parseSource } from "./src/source.js";
-export { readCcPlugins, readCcClaudeGlobal, readCcClaudeProject, readJsonFile } from "./src/settings.js";
+export { readCcPlugins, readCcClaudeGlobal, readCcClaudeProject, readPiPackages, isMcpAdapterInstalled, readJsonFile } from "./src/settings.js";
 export { getCacheBaseDir, getCloneDir, ensureCloned } from "./src/cache.js";
-export { resolvePlugin, readPluginName, discoverSkillPaths, discoverAgentPaths } from "./src/plugin.js";
+export { resolvePlugin, readPluginName, discoverSkillPaths, discoverAgentPaths, discoverMcpConfigPaths } from "./src/plugin.js";
 export { materializeSkillPaths, materializeStandaloneSkillPath, walkSkillDir, sanitizeSkillMarkdown, normalizeSkillName } from "./src/skills.js";
-export type { ParsedSource, ResolvedPlugin, ParsedAgent } from "./src/types.js";
+export type { ParsedSource, ResolvedPlugin, ParsedAgent, McpServerEntry, PluginMcpServer, ManagedMcpEntry, ManagedMcpSidecar, McpSyncResult } from "./src/types.js";
 export {
 	parseFrontmatter,
 	parseCcAgent,
@@ -60,6 +61,15 @@ export {
 	cleanupStaleSymlinks,
 	isSubagentsInstalled,
 } from "./src/agents.js";
+export {
+	getProjectMcpConfigPath,
+	getProjectMcpSidecarPath,
+	hasManagedMcpState,
+	normalizeMcpName,
+	readPluginMcpServers,
+	collectPluginMcpServers,
+	syncProjectMcpConfig,
+} from "./src/mcp.js";
 
 /** Options accepted by the extension entry point. */
 export interface ExtensionOptions {
@@ -148,6 +158,7 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 
 		// --- Load ccPlugins ---
 		const errors: string[] = [];
+		const warnings: string[] = [];
 
 		for (const raw of ccPlugins) {
 			try {
@@ -157,6 +168,33 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 				resolvedPlugins.push(plugin);
 			} catch (err: any) {
 				errors.push(`  ${raw}: ${err?.message || err}`);
+			}
+		}
+
+		// --- MCP handling (from ccPlugins) ---
+		let mcpServerCount = 0;
+		const totalMcpConfigPaths = resolvedPlugins.reduce(
+			(sum, plugin) => sum + plugin.mcpConfigPaths.length,
+			0,
+		);
+
+		if (totalMcpConfigPaths > 0 || hasManagedMcpState(ctx.cwd)) {
+			if (!isMcpAdapterInstalled({ globalSettingsPath: options?.globalSettingsPath })) {
+				if (totalMcpConfigPaths > 0) {
+					ctx.ui.notify(
+						`cc-plugins: found ${totalMcpConfigPaths} MCP config(s) in configured Claude plugins but pi-mcp-adapter is not installed. ` +
+						`Install it with: pi install npm:pi-mcp-adapter`,
+						"warning",
+					);
+				}
+			} else {
+				try {
+					const result = syncProjectMcpConfig(ctx.cwd, resolvedPlugins);
+					mcpServerCount = result.writtenCount;
+					warnings.push(...result.warnings.map((warning) => `  mcp ${warning}`));
+				} catch (err: any) {
+					errors.push(`  mcp: ${err?.message || err}`);
+				}
 			}
 		}
 
@@ -224,12 +262,20 @@ export default function (pi: ExtensionAPI, options?: ExtensionOptions) {
 		const claudeSkillCount = claudeSkillPaths.length;
 		const totalSkillCount = pluginSkillCount + claudeSkillCount;
 
-		if (totalSkillCount > 0 || agentCount > 0 || resolvedPlugins.length > 0) {
+		if (totalSkillCount > 0 || agentCount > 0 || mcpServerCount > 0 || resolvedPlugins.length > 0) {
 			const parts: string[] = [];
 			if (totalSkillCount > 0) parts.push(`${totalSkillCount} skill(s)`);
 			if (agentCount > 0) parts.push(`${agentCount} agent(s)`);
+			if (mcpServerCount > 0) parts.push(`${mcpServerCount} MCP server(s)`);
 			if (resolvedPlugins.length > 0) parts.push(`${resolvedPlugins.length} plugin(s)`);
 			ctx.ui.notify(`cc-plugins: loaded ${parts.join(" and ")}`, "info");
+		}
+
+		if (warnings.length > 0) {
+			ctx.ui.notify(
+				`cc-plugins: ${warnings.length} warning(s):\n${warnings.join("\n")}`,
+				"warning",
+			);
 		}
 
 		if (errors.length > 0) {

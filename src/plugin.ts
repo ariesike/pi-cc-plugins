@@ -6,8 +6,8 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { SOURCE_TYPES, type ParsedSource, ResolvedPlugin } from "./types.js";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { SOURCE_TYPES, type ParsedSource, type ResolvedPlugin } from "./types.js";
 import { walkSkillDir } from "./skills.js";
 import { ensureCloned } from "./cache.js";
 
@@ -56,7 +56,10 @@ export function resolvePlugin(source: ParsedSource, cwd?: string): ResolvedPlugi
 	// Discover agent .md files
 	const agentPaths = discoverAgentPaths(rootDir);
 
-	return { rootDir, name, skillPaths, agentPaths, source };
+	// Discover MCP config files
+	const mcpConfigPaths = discoverMcpConfigPaths(rootDir);
+
+	return { rootDir, name, skillPaths, agentPaths, mcpConfigPaths, source };
 }
 
 /**
@@ -64,17 +67,24 @@ export function resolvePlugin(source: ParsedSource, cwd?: string): ResolvedPlugi
  * Falls back to the directory name if no manifest exists.
  */
 export function readPluginName(pluginDir: string): string {
+	const manifest = readPluginManifest(pluginDir);
+	if (manifest?.name && typeof manifest.name === "string") {
+		return manifest.name;
+	}
+
+	// Fallback to directory name
+	return pluginDir.replace(/\/+$/, "").split("/").pop() || "unknown";
+}
+
+function readPluginManifest(pluginDir: string): Record<string, unknown> | null {
 	const manifestPath = join(pluginDir, ".claude-plugin", "plugin.json");
 	try {
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-		if (manifest.name && typeof manifest.name === "string") {
-			return manifest.name;
-		}
+		if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
+		return manifest as Record<string, unknown>;
 	} catch {
-		// No manifest or invalid JSON — fall through
+		return null;
 	}
-	// Fallback to directory name
-	return pluginDir.replace(/\/+$/, "").split("/").pop() || "unknown";
 }
 
 /**
@@ -141,6 +151,49 @@ export function discoverAgentPaths(pluginDir: string): string[] {
 	walkAgentDir(agentsDir, paths);
 
 	return paths;
+}
+
+/**
+ * Discover MCP config files within a plugin root.
+ * Supports top-level mcp.json, top-level .mcp.json, and a manifest `mcp` path.
+ */
+export function discoverMcpConfigPaths(pluginDir: string): string[] {
+	const paths: string[] = [];
+	const seen = new Set<string>();
+
+	const addPath = (configPath: string) => {
+		if (!isExistingFile(configPath) || seen.has(configPath)) return;
+		seen.add(configPath);
+		paths.push(configPath);
+	};
+
+	addPath(join(pluginDir, "mcp.json"));
+	addPath(join(pluginDir, ".mcp.json"));
+
+	const manifest = readPluginManifest(pluginDir);
+	if (typeof manifest?.mcp === "string") {
+		const manifestPath = resolvePluginPath(pluginDir, manifest.mcp);
+		if (manifestPath) addPath(manifestPath);
+	}
+
+	return paths;
+}
+
+function resolvePluginPath(pluginDir: string, value: string): string | null {
+	const root = resolve(pluginDir);
+	const resolvedPath = resolve(root, value.replace(/^\.\//, ""));
+	const relativePath = relative(root, resolvedPath);
+
+	if (relativePath.startsWith("..") || isAbsolute(relativePath)) return null;
+	return resolvedPath;
+}
+
+function isExistingFile(filePath: string): boolean {
+	try {
+		return existsSync(filePath) && statSync(filePath).isFile();
+	} catch {
+		return false;
+	}
 }
 
 /**

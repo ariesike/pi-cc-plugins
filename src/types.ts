@@ -32,6 +32,8 @@ export interface ResolvedPlugin {
 	skillPaths: string[];
 	/** Absolute paths to agent .md files found in this plugin */
 	agentPaths: string[];
+	/** Absolute paths to MCP config files found in this plugin */
+	mcpConfigPaths: string[];
 	/** The parsed source this plugin came from */
 	source: ParsedSource;
 }
@@ -52,4 +54,35 @@ export interface ParsedAgent {
 	systemPrompt: string;
 	/** Absolute path to the original agent file */
 	filePath: string;
+}
+
+export type McpServerEntry = Record<string, unknown>;
+
+export interface PluginMcpServer {
+	pluginName: string;
+	originalName: string;
+	generatedName: string;
+	definition: McpServerEntry;
+	configPath: string;
+}
+
+export interface ManagedMcpEntry {
+	name: string;
+	pluginName: string;
+	originalName: string;
+	configPath: string;
+}
+
+export interface ManagedMcpSidecar {
+	version: 1;
+	entries: ManagedMcpEntry[];
+}
+
+export interface McpSyncResult {
+	serverCount: number;
+	writtenCount: number;
+	changed: boolean;
+	configPath: string;
+	sidecarPath: string;
+	warnings: string[];
 }
