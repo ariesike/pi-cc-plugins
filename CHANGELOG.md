@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/asermax/pi-cc-plugins/compare/v1.4.0...v1.5.0) (2026-05-26)
+
+
+### Features
+
+* add --cc-plugins-update flag to refresh cached plugin repos ([5c6c3fd](https://github.com/asermax/pi-cc-plugins/commit/5c6c3fd3231eec3104331ef09e4b687045674579))
+
 # [1.4.0](https://github.com/asermax/pi-cc-plugins/compare/v1.3.1...v1.4.0) (2026-05-26)
 
 
