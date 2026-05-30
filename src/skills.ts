@@ -7,14 +7,35 @@
  * and rewrite only the copied SKILL.md frontmatter into Pi-compatible YAML.
  */
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, join, relative } from "node:path";
 import { getCacheBaseDir } from "./cache.js";
-import type { ResolvedPlugin } from "./types.js";
+import type { MaterializedSkillPaths, ResolvedPlugin } from "./types.js";
 
 /** Copy discovered skill directories to cache and sanitize their SKILL.md files. */
 export function materializeSkillPaths(plugin: ResolvedPlugin): string[] {
-	return plugin.skillPaths.map((skillPath) => {
+	return materializePluginSkillPaths(plugin).skillPaths;
+}
+
+/**
+ * Copy discovered plugin skill directories to cache and keep the original
+ * Claude plugin/skill locations for runtime environment compatibility.
+ */
+export function materializePluginSkillPaths(
+	plugin: ResolvedPlugin,
+): MaterializedSkillPaths {
+	const skillPaths: string[] = [];
+	const envContexts: MaterializedSkillPaths["envContexts"] = [];
+
+	for (const skillPath of plugin.skillPaths) {
 		const relativeSkillPath = relative(plugin.rootDir, skillPath);
 		const cacheSkillPath = join(
 			getCacheBaseDir(),
@@ -23,9 +44,19 @@ export function materializeSkillPaths(plugin: ResolvedPlugin): string[] {
 			hash(`${plugin.source.raw}\n${plugin.rootDir}`),
 			slugPath(relativeSkillPath || basename(skillPath)),
 		);
+		const materializedDir = copyAndSanitizeSkillDir(skillPath, cacheSkillPath);
 
-		return copyAndSanitizeSkillDir(skillPath, cacheSkillPath);
-	});
+		skillPaths.push(materializedDir);
+		envContexts.push({
+			pluginName: plugin.name,
+			pluginRoot: plugin.rootDir,
+			skillDir: skillPath,
+			materializedDir,
+			skillFilePath: join(materializedDir, "SKILL.md"),
+		});
+	}
+
+	return { skillPaths, envContexts };
 }
 
 /**
@@ -53,7 +84,10 @@ export function materializeStandaloneSkillPath(
 /**
  * Copy a skill directory to a cache path and sanitize its SKILL.md frontmatter.
  */
-function copyAndSanitizeSkillDir(skillPath: string, cacheSkillPath: string): string {
+function copyAndSanitizeSkillDir(
+	skillPath: string,
+	cacheSkillPath: string,
+): string {
 	rmSync(cacheSkillPath, { recursive: true, force: true });
 	mkdirSync(cacheSkillPath, { recursive: true });
 	cpSync(skillPath, cacheSkillPath, { recursive: true, force: true });
@@ -62,7 +96,10 @@ function copyAndSanitizeSkillDir(skillPath: string, cacheSkillPath: string): str
 	if (existsSync(skillFilePath)) {
 		writeFileSync(
 			skillFilePath,
-			sanitizeSkillMarkdown(readFileSync(skillFilePath, "utf-8"), basename(skillPath)),
+			sanitizeSkillMarkdown(
+				readFileSync(skillFilePath, "utf-8"),
+				basename(skillPath),
+			),
 		);
 	}
 
@@ -70,7 +107,10 @@ function copyAndSanitizeSkillDir(skillPath: string, cacheSkillPath: string): str
 }
 
 /** Rewrite a SKILL.md document so Pi can parse its frontmatter as strict YAML. */
-export function sanitizeSkillMarkdown(content: string, fallbackName: string): string {
+export function sanitizeSkillMarkdown(
+	content: string,
+	fallbackName: string,
+): string {
 	const frontmatter = splitFrontmatter(content);
 	if (frontmatter == null) {
 		return content;
@@ -85,7 +125,10 @@ export function sanitizeSkillMarkdown(content: string, fallbackName: string): st
 }
 
 /** Normalize a skill name to Pi's lowercase a-z, 0-9, hyphen format. */
-export function normalizeSkillName(name: string, fallbackName = "skill"): string {
+export function normalizeSkillName(
+	name: string,
+	fallbackName = "skill",
+): string {
 	const normalized = name
 		.trim()
 		.toLowerCase()
@@ -121,8 +164,11 @@ export function walkSkillDir(dir: string, results: string[]): void {
 	}
 }
 
-function splitFrontmatter(content: string): { frontmatter: string; body: string } | null {
-	if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) return null;
+function splitFrontmatter(
+	content: string,
+): { frontmatter: string; body: string } | null {
+	if (!content.startsWith("---\n") && !content.startsWith("---\r\n"))
+		return null;
 
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
 	if (match == null) return null;
@@ -133,7 +179,10 @@ function splitFrontmatter(content: string): { frontmatter: string; body: string 
 	};
 }
 
-function sanitizeFrontmatterLines(frontmatter: string, fallbackName: string): string[] {
+function sanitizeFrontmatterLines(
+	frontmatter: string,
+	fallbackName: string,
+): string[] {
 	const lines = frontmatter.split(/\r?\n/);
 	const sanitized: string[] = [];
 	let hasName = false;
@@ -156,7 +205,9 @@ function sanitizeFrontmatterLines(frontmatter: string, fallbackName: string): st
 
 		if (key === "name") {
 			hasName = true;
-			sanitized.push(`name: ${quoteYamlString(normalizeSkillName(stripOuterQuotes(value), fallbackName))}`);
+			sanitized.push(
+				`name: ${quoteYamlString(normalizeSkillName(stripOuterQuotes(value), fallbackName))}`,
+			);
 			continue;
 		}
 
@@ -174,19 +225,26 @@ function sanitizeFrontmatterLines(frontmatter: string, fallbackName: string): st
 	}
 
 	if (!hasName) {
-		sanitized.unshift(`name: ${quoteYamlString(normalizeSkillName(fallbackName))}`);
+		sanitized.unshift(
+			`name: ${quoteYamlString(normalizeSkillName(fallbackName))}`,
+		);
 	}
 
 	return sanitized;
 }
 
 function isToolsFrontmatterKey(key: string): boolean {
-	return ["tools", "allowed-tools", "allowed_tools", "allowedTools"].includes(key);
+	return ["tools", "allowed-tools", "allowed_tools", "allowedTools"].includes(
+		key,
+	);
 }
 
 function formatYamlScalar(value: string): string {
 	const unquoted = stripOuterQuotes(value);
-	if (/^(true|false|null)$/i.test(unquoted) || /^-?\d+(\.\d+)?$/.test(unquoted)) {
+	if (
+		/^(true|false|null)$/i.test(unquoted) ||
+		/^-?\d+(\.\d+)?$/.test(unquoted)
+	) {
 		return unquoted;
 	}
 
@@ -209,7 +267,14 @@ function quoteYamlString(value: string): string {
 }
 
 function isBlockScalar(value: string): boolean {
-	return value === "|" || value === ">" || value.startsWith("|+") || value.startsWith("|-") || value.startsWith(">+") || value.startsWith(">-");
+	return (
+		value === "|" ||
+		value === ">" ||
+		value.startsWith("|+") ||
+		value.startsWith("|-") ||
+		value.startsWith(">+") ||
+		value.startsWith(">-")
+	);
 }
 
 function slugPath(value: string): string {

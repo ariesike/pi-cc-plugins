@@ -86,3 +86,22 @@ export interface McpSyncResult {
 	sidecarPath: string;
 	warnings: string[];
 }
+
+/** Runtime environment context for a materialized Claude Code skill. */
+export interface SkillEnvContext {
+	/** Plugin/package name the skill came from. */
+	pluginName: string;
+	/** Original Claude plugin root directory. */
+	pluginRoot: string;
+	/** Original skill directory under the plugin root. */
+	skillDir: string;
+	/** Pi-compatible cached skill directory returned via resources_discover. */
+	materializedDir: string;
+	/** Pi-compatible cached SKILL.md path. */
+	skillFilePath: string;
+}
+
+export interface MaterializedSkillPaths {
+	skillPaths: string[];
+	envContexts: SkillEnvContext[];
+}

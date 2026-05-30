@@ -4,6 +4,8 @@ Use [Claude Code](https://code.claude.com) plugins (skills, agents, and MCP serv
 
 This extension bridges Claude Code's plugin ecosystem into Pi. It reads source references from your settings, clones remote repos into a local cache, and exposes the **skills**, **agents**, and **MCP configs** found inside them so Pi loads them natively.
 
+> **Fork notice:** This project has been forked and modified.
+
 ## Install
 
 ```bash
@@ -18,7 +20,18 @@ pi install git:git@github.com:asermax/pi-cc-plugins.git
 
 ## Sources
 
-Resources can come from two kinds of sources: **plugins** (remote or local repos) and **standalone `.claude` directories** (global or per-project). Both are configured in your Pi settings.
+Resources can come from three kinds of sources: **plugins** (remote or local repos), **session-only plugin directories** passed on the command line, and **standalone `.claude` directories** (global or per-project).
+
+### Session-only `--plugin-dir`
+
+Like Claude Code's `--plugin-dir`, Pi can load a Claude Code plugin directory for the current session only:
+
+```bash
+pi --plugin-dir ~/my-plugins/dev-plugin
+pi --plugin-dir ~/plugins/a --plugin-dir ~/plugins/b
+```
+
+The flag is repeatable. Each directory is scanned with the same plugin rules as `ccPlugins`, so its `skills/`, `agents/`, and MCP config files are discovered without adding anything to settings.
 
 ### Plugins
 
@@ -116,12 +129,21 @@ Skills are `SKILL.md` files that teach Pi how to handle specific tasks. They are
 
 ### Discovery
 
-1. On startup, the extension reads your `ccPlugins` and the `ccClaudeGlobal`/`ccClaudeProject` settings
+1. On startup, the extension reads `--plugin-dir`, your `ccPlugins`, and the `ccClaudeGlobal`/`ccClaudeProject` settings
 2. Remote plugins are shallow-cloned into `~/.cache/pi-cc-plugins/` (if not already cached)
 3. Each source is scanned for `skills/` directories containing `SKILL.md` files
 4. Skill directories are copied into `~/.cache/pi-cc-plugins/skills/` with normalized frontmatter
 5. Cached skill paths are contributed to Pi via the `resources_discover` event
 6. Pi loads them as native skills — they appear in `/skills` and work like any other Pi skill
+
+### Claude Code Skill Environment
+
+When a Claude Code skill from a plugin is loaded (for example via `/skill:name` or when the agent reads its `SKILL.md`), the extension tracks the active skill context and injects Claude-compatible environment variables:
+
+- `CLAUDE_PLUGIN_ROOT` → the original plugin root directory
+- `CLAUDE_SKILL_DIR` → the original skill directory
+
+Bash tool calls are prefixed with these exports, and non-Bash tool arguments can use `$CLAUDE_PLUGIN_ROOT`, `${CLAUDE_PLUGIN_ROOT}`, `$CLAUDE_SKILL_DIR`, or `${CLAUDE_SKILL_DIR}` placeholders.
 
 ### Frontmatter Sanitization
 
@@ -234,6 +256,8 @@ If multiple files define the same server name, later files in that order win bef
 4. Managed entries are tracked in `{project}/.pi/mcp.cc-plugins.json` so stale plugin servers can be removed on the next startup
 
 Server names are namespaced as `{plugin-name}__{server-name}`. For example, a `chrome-devtools` server from `my-plugin` becomes `my-plugin__chrome-devtools`.
+
+MCP server definitions may use Claude Code path placeholders. Before writing to `.pi/mcp.json`, the extension expands `$CLAUDE_PLUGIN_ROOT` / `${CLAUDE_PLUGIN_ROOT}` to the source plugin root. `$CLAUDE_SKILL_DIR` / `${CLAUDE_SKILL_DIR}` is expanded when the MCP config file lives inside a plugin skill directory. The generated MCP server `env` also includes `CLAUDE_PLUGIN_ROOT`, and includes `CLAUDE_SKILL_DIR` when a skill directory can be inferred.
 
 User-owned entries in `.pi/mcp.json` are preserved. If a generated plugin server name collides with an existing user server, the plugin server is skipped with a warning.
 
